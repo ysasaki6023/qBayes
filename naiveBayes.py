@@ -65,7 +65,7 @@ class NaiveBayes:
                 self.cateData[index] = cate
         return
 
-    def train(self):
+    def train(self,wordFilter=None):
         """ナイーブベイズ分類器の訓練"""
         # データを作成
         self.data = []
@@ -82,6 +82,7 @@ class NaiveBayes:
         for cat,doc in self.data:
             self.catcount[cat] += 1
             for word in doc:
+                if wordFilter and (not word in wordFilter): continue
                 self.vocabularies.add(word)
                 self.wordcount[cat][word] += 1
         # 単語の条件付き確率の分母の値をあらかじめ一括計算
@@ -105,6 +106,22 @@ class NaiveBayes:
         # wordcount[cat]はdefaultdict(int)なのでカテゴリに存在しなかった単語はデフォルトの0を返す
         # 分母はtrain()の最後で一括計算済み
         return float(self.wordcount[cat][word] + 1) / float(self.denominator[cat])
+
+    def scoreDict(self,doc):
+        probCat = self.scoreList(doc)
+        probDict = {}
+        for i, cat in enumerate(self.categories):
+            probDict[cat] = probCat[i]
+        return probDict
+
+    def scoreList(self,doc):
+        probCat = []
+        for c in self.categories:
+            probCat.append(math.exp(self.score(doc,c)))
+        total = sum(probCat)
+        for i,c in enumerate(self.categories):
+            probCat[i] /= total
+        return probCat
     
     def score(self, doc, cat):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
@@ -156,9 +173,19 @@ if __name__ == "__main__":
     nb = NaiveBayes()
     nb.loadTextFile    (fpath="data/test.csv",index_column="",columns_to_use=["A","B"])
     nb.loadCategoryFile(fpath="data/cat.csv" ,index_column="",column_to_use="category")
-    nb.train()
+    nb.train(wordFilter=[u"は",u"ため",u"ゴム",u"以来"])
+    print nb
     nb.wordInfo(topn=10)
     nb.wordInfo(fpath="word.csv")
+    #print nb.categories
+    print "log P(1|は, ため) =", nb.score([u"は",u"ため"], u"1")
+    print "log P(2|は, ため) =", nb.score([u"は",u"ため"], u"2")
+    print "log P(X|は, ため) =", nb.scoreDict([u"は",u"ため"])
+    print
+    print "log P(1|は, ため, ゴム) =", nb.score([u"は",u"ため",u"ゴム"], u"1")
+    print "log P(2|は, ため, ゴム) =", nb.score([u"は",u"ため",u"ゴム"], u"2")
+    print "log P(X|は, ため, ゴム) =", nb.scoreDict([u"は",u"ため",u"ゴム"])
+    print "log P(X|は, ため, 以来, が) =", nb.scoreDict([u"は",u"ため",u"以来",u"が"])
 
     """
     print "P(Chinese|yes) = ", nb.wordProb("Chinese", "yes")
