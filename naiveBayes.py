@@ -4,6 +4,8 @@ import math,sys,csv
 import numpy as np
 import MeCab
 from collections import defaultdict
+import os
+import cPickle as pickle
 
 class NaiveBayes:
     """Multinomial Naive Bayes"""
@@ -15,16 +17,28 @@ class NaiveBayes:
         self.denominator = {}       # denominator[cat] P(word|cat)の分母の値
         self.textData = {}
         self.cateData = {}
+        self.cacheDir = "cache"
     
     def __str__(self):
         total = sum(self.catcount.values())
         return "documents: %d, vocabularies: %d, categories: %d" % (total, len(self.vocabularies), len(self.categories))
 
     def loadTextFile(self,fpath,index_column,columns_to_use=None):
+        cacheName = fpath+str(index_column)+str(columns_to_use)
+        cacheName = cacheName.replace("/","").replace(".","").replace("[","").replace("]","").replace(",","").replace("'","").replace(" ","")
+        cacheFname = os.path.join(self.cacheDir,cacheName+".pickle")
+        if not os.path.exists(self.cacheDir):
+            os.makedirs(self.cacheDir)
+        if os.path.exists(cacheFname):
+            with open(cacheFname,"rb") as f:
+                self.textData = pickle.load(f)
+            return
+
         self.textfile_index_column   = index_column
         self.textfile_columns_to_use = columns_to_use
         tagger = MeCab.Tagger("-Owakati") # -Ochasen -Owakati
 
+        print "loading:%s"%fpath
         with open(fpath, 'r') as f:
             reader = csv.reader(f)
             header = next(reader)
@@ -34,7 +48,8 @@ class NaiveBayes:
             else:
                 idx_to_use = [i for i in range(len(row)) if not i == idx_index]
 
-            for row in reader:
+            for i,row in enumerate(reader):
+                if i%1000==0: print "processing: %d"%i
                 index = row[idx_index]
                 line  = ""
                 for i in idx_to_use:
@@ -46,6 +61,8 @@ class NaiveBayes:
                 words = line.split()
 
                 self.textData[index] = words
+        with open(cacheFname,"wb") as f:
+            pickle.dump(self.textData,f,protocol=2)
         return
 
     def loadCategoryFile(self,fpath,index_column,column_to_use):
@@ -55,6 +72,7 @@ class NaiveBayes:
         with open(fpath, 'r') as f:
             reader = csv.reader(f)
             header = next(reader)
+            header = [x.decode("utf-8") for x in header]
             idx_index  = header.index(index_column)
             idx_to_use = header.index(column_to_use)
 
@@ -70,6 +88,9 @@ class NaiveBayes:
         # データを作成
         self.data = []
         for index in self.cateData:
+            if not index in self.textData:
+                print "%s is not in self.textData. Skip"%index
+                continue
             self.data.append([index,self.textData[index]])
         
         # 文書集合からカテゴリを抽出して辞書を初期化
@@ -79,7 +100,9 @@ class NaiveBayes:
             self.wordcount[cat] = defaultdict(int)
             self.catcount[cat] = 0
         # 文書集合からカテゴリと単語をカウント
-        for cat,doc in self.data:
+        for cnt,catdog in enumerate(self.data):
+            if cnt%1000==0: print "train(): processing %d/%d"%(cnt,len(self.data))
+            cat,doc = catdog
             self.catcount[cat] += 1
             for word in doc:
                 if wordFilter and (not word in wordFilter): continue
@@ -140,7 +163,8 @@ class NaiveBayes:
 
         wordNum = {}
         wordEnt = {}
-        for w in words:
+        for cnt,w in enumerate(words):
+            if cnt%10000==0: print "wordInfo(): processing %d/%d"%(cnt,len(words))
             wordNum[w] = {}
             for cat in self.categories:
                 wordNum[w][cat] = self.wordcount[cat][w]
@@ -171,9 +195,15 @@ class NaiveBayes:
 
 if __name__ == "__main__":
     nb = NaiveBayes()
-    nb.loadTextFile    (fpath="data/test.csv",index_column="",columns_to_use=["A","B"])
-    nb.loadCategoryFile(fpath="data/cat.csv" ,index_column="",column_to_use="category")
-    nb.train(wordFilter=[u"は",u"ため",u"ゴム",u"以来"])
+    print "load files..."
+    nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'contract', u'research',u'financial'])
+    print "load files..."
+    nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
+    print "...done"
+    #nb.train(wordFilter=[u"は",u"ため",u"ゴム",u"以来"])
+    print "training..."
+    nb.train()
+    print "...done"
     print nb
     nb.wordInfo(topn=10)
     nb.wordInfo(fpath="word.csv")
