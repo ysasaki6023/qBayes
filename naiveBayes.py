@@ -10,19 +10,39 @@ import cPickle as pickle
 class NaiveBayes:
     """Multinomial Naive Bayes"""
     def __init__(self):
-        #self.categories = set()     # カテゴリの集合
-        #self.vocabularies = set()   # ボキャブラリの集合
         self.wordcount = None         # wordcount[cat][word] カテゴリでの単語の出現回数
         self.catcount = None          # catcount[cat] カテゴリの出現回数
-        self.denominator = {}       # denominator[cat] P(word|cat)の分母の値
+        self.denominator = None       # denominator[cat] P(word|cat)の分母の値
         self.textData = {}
         self.cateData = {}
         self.cacheDir = "cache"
+        self.data = None
     
     def __str__(self):
-        #total = sum(self.catcount.values())
-        #print self.categories
-        return "documents: %d, vocabularies: %d, categories: %d" % (len(self.data), len(self.vocabularies), len(self.categories))
+        return "vocabularies: %d, categories: %d" % (len(self.vocabularies), len(self.categories))
+
+    def save(self,fpath):
+        p = {}
+        p["vocabularies"] = self.vocabularies
+        p["categories"]   = self.categories
+        p["vocab_lookup"] = self.vocab_lookup
+        p["np_words"]     = self.np_words
+        p["np_categ"]     = self.np_categ
+
+        with open(fpath,"wb") as f:
+            pickle.dump(p,f,protocol=2)
+        return
+
+    def load(self,fpath):
+        with open(fpath,"rb") as f:
+            p = pickle.load(f)
+        self.vocabularies = p["vocabularies"]
+        self.categories   = p["categories"]
+        self.vocab_lookup = p["vocab_lookup"]
+        self.np_words     = p["np_words"]
+        self.np_categ     = p["np_categ"]
+
+        return
 
     def loadTextFile(self,fpath,index_column,columns_to_use=None):
         cacheName = fpath+str(index_column)+str(columns_to_use)
@@ -37,7 +57,7 @@ class NaiveBayes:
 
         self.textfile_index_column   = index_column
         self.textfile_columns_to_use = columns_to_use
-        tagger = MeCab.Tagger("-Owakati") # -Ochasen -Owakati
+        tagger = MeCab.Tagger("-Ochasen")
 
         print "loading:%s"%fpath
         with open(fpath, 'r') as f:
@@ -57,9 +77,21 @@ class NaiveBayes:
                     line += row[i]+" "
 
                 ## Wakachi-gaki
-                line = tagger.parse(line)
-                line = line.decode('utf-8')
-                words = line.split()
+                #line = tagger.parse(line)
+                line = tagger.parseToNode(line)
+                # Extract word and class
+                words = []
+                while line:
+                    word = line.surface.decode("utf-8", "ignore")
+                    clazz = line.feature.split(',')[0].decode('utf-8', 'ignore')
+                    if clazz==u"名詞" and clazz != u'BOS/EOS':
+                        #word_class.append((word, clazz))
+                        words.append(word)
+                    line = line.next
+
+                #line = line.decode('utf-8')
+                #words = line.split()
+                #words = [x[0] for x in word_class]
 
                 self.textData[index] = words
         with open(cacheFname,"wb") as f:
@@ -84,7 +116,7 @@ class NaiveBayes:
                 self.cateData[index] = cate
         return
 
-    def train(self,wordFilter=None):
+    def train(self,minfreq=None,wordFilter=None):
         """ナイーブベイズ分類器の訓練"""
         # データを作成
         self.data = []
@@ -101,14 +133,27 @@ class NaiveBayes:
         self.categories = list(self.categories)
 
         # 全単語数を計算
-        self.vocabularies = set()
+        #self.vocabularies = set()
+        self.vocabcount   = {}
         for cnt,catdog in enumerate(self.data):
             if cnt%1000==0: print "train(): counting words %d/%d"%(cnt,len(self.data))
             _,doc = catdog
             for word in doc:
+                if word.isdigit(): continue
                 if wordFilter and (not word in wordFilter): continue
-                self.vocabularies.add(word)
-        self.vocabularies = list(self.vocabularies)
+                #self.vocabularies.add(word)
+                if not word in self.vocabcount: self.vocabcount[word] = 0
+                self.vocabcount[word] += 1
+        print len(self.vocabcount)
+        if minfreq:
+            print "delete word < minfreq"
+            #for i,w in enumerate(self.vocabularies):
+            dictList = self.vocabcount.keys()
+            for w in dictList:
+                if self.vocabcount[w]<minfreq:
+                    del self.vocabcount[w]
+        print len(self.vocabcount)
+        self.vocabularies = list(self.vocabcount.keys())
         self.vocab_lookup = {w:i for i,w in enumerate(self.vocabularies)}
 
         # vocabulary 配列を作成
@@ -122,15 +167,10 @@ class NaiveBayes:
             idx_cat = self.categories.index(cat)
             self.np_categ[idx_cat] += 1
             for word in doc:
-                if wordFilter and (not word in wordFilter): continue
+                if not word in self.vocab_lookup: continue
                 idx_word = self.vocab_lookup[word]
                 self.np_words[idx_cat][idx_word] += 1
 
-        # 単語の条件付き確率の分母の値をあらかじめ一括計算
-        self.denominator = np.zeros(len(self.categories),dtype=np.float32)
-        for cat in self.categories:
-            idx_cat = self.categories.index(cat)
-            self.denominator[idx_cat] = np.sum(self.np_words[idx_cat]) + len(self.vocabularies)
     
     def classify(self, doc):
         """事後確率の対数 log(P(cat|doc)) がもっとも大きなカテゴリを返す"""
@@ -145,10 +185,34 @@ class NaiveBayes:
     
     def wordProb(self, word, cat):
         """単語の条件付き確率 P(word|cat) を求める"""
+        # 単語の条件付き確率の分母の値をあらかじめ一括計算
+        oneNumFlag = False
+        if not type(word) == type([]): word,oneNumFlag = [word],True
+        if type(self.denominator) == type(None):
+            self.denominator = np.zeros(len(self.categories),dtype=np.float32)
+            for cat in self.categories:
+                idx_cat = self.categories.index(cat)
+                self.denominator[idx_cat] = np.sum(self.np_words[idx_cat]) + len(self.vocabularies)
         # ラプラススムージングを適用
         # wordcount[cat]はdefaultdict(int)なのでカテゴリに存在しなかった単語はデフォルトの0を返す
-        # 分母はtrain()の最後で一括計算済み
-        return float(self.wordcount[cat][word] + 1) / float(self.denominator[cat])
+        wd_idx = np.zeros(len(word),dtype=np.int32)
+        mk_idx = np.zeros(len(word),dtype=np.bool)
+        for i,w in enumerate(word):
+            if w in self.vocab_lookup:
+                idx = self.vocab_lookup[w]
+                mk_idx[i] = False
+            else:
+                idx = 0 # dummy
+                mk_idx[i] = True
+            wd_idx[i] = idx
+
+        nominator = self.np_words[self.categories.index(cat)][wd_idx]
+        nominator[mk_idx] = 0.
+        val =  nominator + 1. / self.denominator[self.categories.index(cat)]
+
+        if oneNumFlag: return val[0]
+        else         : return val
+
 
     def scoreDict(self,doc):
         probCat = self.scoreList(doc)
@@ -168,10 +232,8 @@ class NaiveBayes:
     
     def score(self, doc, cat):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
-        total = sum(self.catcount.values())
-        score = math.log(float(self.catcount[cat]) / total)  # log P(cat)
-        for word in doc:
-            score += math.log(self.wordProb(word, cat))  # log P(word|cat)
+        score  = np.log(self.np_categ[self.categories.index(cat)])/np.sum(self.np_categ)  # log P(cat)
+        score += np.sum( np.log(self.wordProb( doc, cat ) ) )
         return score
     
     def wordInfo(self,fpath=None,topn=None,minfreq=None):
@@ -192,7 +254,7 @@ class NaiveBayes:
         wordidx = np.linspace(0,self.np_words.shape[1]-1,num=self.np_words.shape[1],dtype=np.int32)
         entropy = entropy[mask]
 
-        idx_sorted = np.argsort(entropy)[::-1]
+        idx_sorted = np.argsort(entropy)
         wcounts = wcounts[:,idx_sorted]
         wordidx = wordidx[idx_sorted]
         entropy = entropy[idx_sorted]
@@ -222,21 +284,25 @@ if __name__ == "__main__":
     nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
     print "...done"
     #nb.train(wordFilter=[u"は",u"ため",u"ゴム",u"以来"])
-    print "training..."
-    nb.train()
-    print "...done"
-    print nb
-    nb.wordInfo(topn=10)
-    nb.wordInfo(fpath="word.csv",minfreq=100)
+    nb.train(minfreq=100)
+    nb.save("test.pickle")
+
+    print "load..."
+    nb2 = NaiveBayes()
+    nb2.load("test.pickle")
+    print nb2
+    nb2.wordInfo(topn=10)
+    nb2.wordInfo(fpath="word.csv",minfreq=100)
     #print nb.categories
-    print "log P(1|は, ため) =", nb.score([u"は",u"ため"], u"1")
-    print "log P(2|は, ため) =", nb.score([u"は",u"ため"], u"2")
-    print "log P(X|は, ため) =", nb.scoreDict([u"は",u"ため"])
-    print
-    print "log P(1|は, ため, ゴム) =", nb.score([u"は",u"ため",u"ゴム"], u"1")
-    print "log P(2|は, ため, ゴム) =", nb.score([u"は",u"ため",u"ゴム"], u"2")
-    print "log P(X|は, ため, ゴム) =", nb.scoreDict([u"は",u"ため",u"ゴム"])
-    print "log P(X|は, ため, 以来, が) =", nb.scoreDict([u"は",u"ため",u"以来",u"が"])
+    print "log P(1|暖冬) =", nb2.score([u"暖冬"], u"1")
+    print "log P(X|暖冬) =", nb2.scoreDict([u"暖冬"])
+    #print "log P(2|は, ため) =", nb.score([u"は",u"ため"], u"2")
+    #print "log P(X|は, ため) =", nb.scoreDict([u"は",u"ため"])
+    #print
+    #print "log P(1|は, ため, ゴム) =", nb.score([u"は",u"ため",u"ゴム"], u"1")
+    #print "log P(2|は, ため, ゴム) =", nb.score([u"は",u"ため",u"ゴム"], u"2")
+    #print "log P(X|は, ため, ゴム) =", nb.scoreDict([u"は",u"ため",u"ゴム"])
+    #print "log P(X|は, ため, 以来, が) =", nb.scoreDict([u"は",u"ため",u"以来",u"が"])
 
     """
     print "P(Chinese|yes) = ", nb.wordProb("Chinese", "yes")
