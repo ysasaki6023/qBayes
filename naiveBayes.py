@@ -366,6 +366,8 @@ class NaiveBayes:
 
         if fpath: f.close()
 
+        return [self.vocabularies[wordidx[i]] for i in range(len(wordidx))]
+
 if __name__ == "__main__":
     """
     nb = NaiveBayes()
@@ -381,7 +383,7 @@ if __name__ == "__main__":
     nb2.load("test.pickle")
     print nb2
     nb2.wordInfo(topn=100)
-    nb2.wordInfo(fpath="word.csv",minfreq=200)
-    nb2.evaluate(fpath="mat.csv")
+    wd = nb2.wordInfo(fpath="word.csv",minfreq=1000)
+    nb2.evaluate(fpath="mat.csv",wordFilter=wd)
     #print "log P(1|暖冬) =", nb2.score([u"暖冬"], u"1")
     #print "log P(X|暖冬) =", nb2.scoreDict([u"暖冬"])
