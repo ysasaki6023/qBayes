@@ -218,7 +218,7 @@ class NaiveBayes:
                 best = cat
         return best
     
-    def wordProb(self, word, cat):
+    def wordProb(self, word, cat, wordFilter):
         """単語の条件付き確率 P(word|cat) を求める"""
         # 単語の条件付き確率の分母の値をあらかじめ一括計算
         oneNumFlag = False
@@ -232,13 +232,15 @@ class NaiveBayes:
         # wordcount[cat]はdefaultdict(int)なのでカテゴリに存在しなかった単語はデフォルトの0を返す
         wd_idx = np.zeros(len(word),dtype=np.int32)
         mk_idx = np.zeros(len(word),dtype=np.bool)
+        if wordFilter: wordFilter_lookup = {w:True for w in wordFilter}
+        else         : wordFilter_lookup = None
         for i,w in enumerate(word):
+            idx = 0 # dummy
+            mk_idx[i] = True
             if w in self.vocab_lookup:
-                idx = self.vocab_lookup[w]
-                mk_idx[i] = False
-            else:
-                idx = 0 # dummy
-                mk_idx[i] = True
+                if (not wordFilter_lookup) or (wordFilter_lookup and w in wordFilter_lookup):
+                    idx = self.vocab_lookup[w]
+                    mk_idx[i] = False
             wd_idx[i] = idx
 
         nominator = self.np_words[self.categories.index(cat),wd_idx]
@@ -279,9 +281,9 @@ class NaiveBayes:
     
     def score(self, doc, cat, wordFilter=None):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
-        doc = self.applyFilter(doc)
+        #doc = self.applyFilter(doc, wordFilter)
         score  = np.log(self.np_categ[self.categories.index(cat)])/np.sum(self.np_categ)  # log P(cat)
-        score += np.sum( np.log(self.wordProb( doc, cat ) ) ) # sum log P(doc|cat)
+        score += np.sum( np.log(self.wordProb( doc, cat, wordFilter ) ) ) # sum log P(doc|cat)
         return score
 
     def applyFilter(self, doc, wordFilter=None):
@@ -299,11 +301,11 @@ class NaiveBayes:
         if not self.data    : self.buildData()
 
         nCat = len(self.categories)
-        mat = np.zeros((nCat,nCat),dtype=np.float32)
+        mat = np.zeros((nCat,nCat),dtype=np.int32)
 
         print
         for cnt, catdog in enumerate(self.data):
-            if cnt%1000==0: print "..%d"%cnt
+            if cnt%100==0: print "..%d"%cnt
             t, x = catdog
             sd = self.scoreDict(x,wordFilter)
             y  = max(sd.items(), key=lambda x:x[1])[0]
@@ -326,15 +328,25 @@ class NaiveBayes:
     
     def wordInfo(self,fpath=None,topn=None,minfreq=None):
         """単語の性質を出力"""
-        prob = self.np_words.astype(np.float32) / np.sum(self.np_words,axis=0)
-        entropy = - prob * np.ma.log(prob)
-        entropy = np.sum(entropy, axis=0)
+        prob1 = self.np_words.astype(np.float32) / np.sum(self.np_words,axis=0)
+        entropy1 = - prob1 * np.ma.log(prob1)
+        entropy1 = np.sum(entropy1, axis=0)
+        # カテゴリレベルでそもそも発生しているエントロピーの補正
+        prob0 = self.np_categ.astype(np.float32) / np.sum(self.np_categ)
+        entropy0 = - prob0 * np.ma.log(prob0)
+        entropy0 = np.sum(entropy0)
+
+        entropy  = entropy1 - entropy0
 
         if fpath:
             f = open(fpath, 'w')
             writer = csv.writer(f, lineterminator='\n')
             line = ["index","word","entropy"] # vocabularies -> need to sort, thus use wordidx
-            for j in range(len(self.categories)): line.append(self.categories[j]) # wcounts -> already sorted
+            for j in range(len(self.categories)): line.append(self.categories[j])
+            for j in range(len(self.categories)): line.append("P("+self.categories[j]+"|word)")
+            writer.writerow(line)
+            line = ["","category",entropy0] # vocabularies -> need to sort, thus use wordidx
+            for j in range(len(self.categories)): line.append(self.np_categ[j])
             writer.writerow(line)
 
         mask = np.zeros(len(self.vocabularies),dtype=bool)
@@ -360,6 +372,7 @@ class NaiveBayes:
                 line = [i,self.vocabularies[wordidx[i]].encode("utf-8")] # vocabularies -> need to sort, thus use wordidx
                 line.append(entropy[i]) # entropy -> already sorted
                 for j in range(len(self.categories)): line.append(wcounts[j,i]) # wcounts -> already sorted
+                for j in range(len(self.categories)): line.append(wcounts[j,i].astype(np.float32)/np.sum(wcounts[:,i]))
                 writer.writerow(line)
             else:
                 print "%8d  H(%20s) = %.3e"%(i,self.vocabularies[wordidx[i]],entropy[i])
@@ -382,8 +395,8 @@ if __name__ == "__main__":
     nb2 = NaiveBayes()
     nb2.load("test.pickle")
     print nb2
-    nb2.wordInfo(topn=100)
-    wd = nb2.wordInfo(fpath="word.csv",minfreq=1000)
+    #nb2.wordInfo(topn=100)
+    wd = nb2.wordInfo(fpath="word.csv",minfreq=500)
     nb2.evaluate(fpath="mat.csv",wordFilter=wd)
     #print "log P(1|暖冬) =", nb2.score([u"暖冬"], u"1")
     #print "log P(X|暖冬) =", nb2.scoreDict([u"暖冬"])
