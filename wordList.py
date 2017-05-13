@@ -1,11 +1,12 @@
 #coding:utf-8
 ## cited from http://aidiary.hatenablog.com/entry/20100613/1276389337
-import math,sys,csv
+import math,sys,csv,re
 import numpy as np
 import MeCab
 from collections import defaultdict
 import os
 import cPickle as pickle
+import pandas as pd
 
 class NaiveBayes:
     """Multinomial Naive Bayes"""
@@ -101,8 +102,9 @@ class NaiveBayes:
                     word = line.surface.decode("utf-8", "ignore")
                     clazz = line.feature.split(',')[0].decode('utf-8', 'ignore')
                     if clazz==u"名詞" and clazz != u'BOS/EOS':
-                        if not word.isdigit():
-                            words.append(word)
+                        if word.isdigit(): continue
+                        words.append(word)
+
                     line = line.next
 
                 self.textData[index] = words
@@ -157,7 +159,7 @@ class NaiveBayes:
             self.data.append([self.cateData[index],self.textData[index]])
         return
 
-    def train(self,minfreq=None):
+    def train(self,minFreq=None):
         """ナイーブベイズ分類器の訓練"""
         print "train()"
         self.buildData(verbose=True)
@@ -179,12 +181,12 @@ class NaiveBayes:
                 self.vocabcount[word] += 1
         origNum = len(self.vocabcount)
         print
-        if minfreq:
+        if minFreq:
             dictList = self.vocabcount.keys()
             for w in dictList:
-                if self.vocabcount[w]<minfreq:
+                if self.vocabcount[w]<minFreq:
                     del self.vocabcount[w]
-            print "..found %d words originally, which is reduced to %d under minfreq=%d"%(origNum,len(self.vocabcount),minfreq)
+            print "..found %d words originally, which is reduced to %d under minFreq=%d"%(origNum,len(self.vocabcount),minFreq)
         else:
             print "..found %d words"%origNum
         self.vocabularies = list(self.vocabcount.keys())
@@ -228,8 +230,7 @@ class NaiveBayes:
             for cat in self.categories:
                 idx_cat = self.categories.index(cat)
                 self.denominator[idx_cat] = np.sum(self.np_words[idx_cat]) + len(self.vocabularies)
-        # ラプラススムージングを適用
-        # wordcount[cat]はdefaultdict(int)なのでカテゴリに存在しなかった単語はデフォルトの0を返す
+        # ラプラススムージング
         wd_idx = np.zeros(len(word),dtype=np.int32)
         mk_idx = np.zeros(len(word),dtype=np.bool)
         if wordFilter: wordFilter_lookup = {w:True for w in wordFilter}
@@ -326,7 +327,7 @@ class NaiveBayes:
         pass
 
     
-    def wordInfo(self,fpath=None,topn=None,minfreq=None):
+    def wordInfo(self,fpath=None,topn=None,minFreq=None,maxEntropy=None):
         """単語の性質を出力"""
         prob1 = self.np_words.astype(np.float32) / np.sum(self.np_words,axis=0)
         entropy1 = - prob1 * np.ma.log(prob1)
@@ -351,7 +352,8 @@ class NaiveBayes:
 
         mask = np.zeros(len(self.vocabularies),dtype=bool)
         mask[:] = True
-        if minfreq: mask[ np.sum(self.np_words,axis=0) < minfreq ] = False
+        if minFreq: mask[ np.sum(self.np_words,axis=0) < minFreq ] = False
+        if maxEntropy: mask[ entropy > maxEntropy ] = False
 
         wcounts = self.np_words[:,mask]
         wordidx = np.linspace(0,self.np_words.shape[1]-1,num=self.np_words.shape[1],dtype=np.int32)[mask]
@@ -381,31 +383,129 @@ class NaiveBayes:
 
         return [self.vocabularies[wordidx[i]] for i in range(len(wordidx))]
 
+    def CountWords(self,index,topn=None,minFreq=None,wordList=None,verbose=True):
+        if not self.textData:
+            print "please execute loadTextFile() first"
+            return
+        if not type(index)==type([]):
+            index = [index]
+        # 全単語数を計算
+        self.vocabcount   = {}
+        for idx in index:
+            if not idx in self.textData:
+                print "%s not in self.textData. Skip"%idx
+                continue
+            for word in self.textData[idx]:
+                if wordList:
+                    if not word in wordList: continue
+                if not word in self.vocabcount: self.vocabcount[word] = 0
+                self.vocabcount[word] += 1
+        origNum = len(self.vocabcount)
+        if minFreq:
+            dictList = self.vocabcount.keys()
+            for w in dictList:
+                if self.vocabcount[w]<minFreq:
+                    del self.vocabcount[w]
+
+        ret = []
+        count = -1
+        for w,num in sorted(self.vocabcount.items(), key=lambda x: x[1])[::-1]:
+            count += 1
+            if topn and count>=topn: break
+            ret.append( (w,num) )
+
+        if verbose:
+            for w,n in ret:
+                print w,n
+
+        return ret
+
+    def dumpWordsByCompany(self,fpath,classList=None,topn=10,minFreq=None,wordList=None):
+        if not self.textData:
+            print "please execute loadTextFile() first"
+            return
+        f = open(fpath,"w")
+        writer = csv.writer(f, lineterminator='\n')
+        line = ["index"] + ["word%d"%i for i in range(topn)] + ["count%d"%i for i in range(topn)]
+        writer.writerow(line)
+
+        cnt = -1
+
+        targetIndex = []
+        if not classList:
+            for index in self.textData:
+                tagetIndex.append([index,[index]])
+        else:
+            targetIndex = classList
+
+        for title,index in targetIndex:
+            cnt += 1
+            if cnt%10 == 0: print "%d/%d"%(cnt,len(targetIndex))
+            words = self.CountWords(index,topn=topn,minFreq=minFreq,wordList=wordList,verbose=False)
+            line = [title]
+
+            for w in words: line.append(w[0].encode("utf-8"))
+            if len(words)<topn:
+                for i in range(topn-len(words)): line.append("")
+
+            for w in words: line.append(w[1])
+            if len(words)<topn:
+                for i in range(topn-len(words)): line.append(0)
+
+            writer.writerow(line)
+        f.close()
+        return
+
+
+    def cleanupWords(self,wordList):
+        symbolReg1 = re.compile(u'[︰-＠△①-⑨㈱＜＞;・ｍⅠ-Ⅹ]') # 全角記号
+        symbolReg2 = re.compile(r'[!-/:-@[-`{-~]+$') # 半角記号
+        symbolReg3 = re.compile(r'^[a-zA-Z]$') # 半角英数一文字
+        goodWords = []
+        for w in wordList:
+            if symbolReg1.search(w): continue
+            if symbolReg2.search(w): continue
+            if symbolReg3.search(w): continue
+            if w in [u"億",u"兆",u"付",u"買" ]: continue
+            goodWords.append(w)
+        return goodWords
+
+def loadClass(fpath):
+    d = pd.read_csv(fpath)
+    cls = {}
+    for i, row in d.iterrows():
+        c = row["分類"]
+        if not c in cls:
+            cls[c] = []
+        v = row["銘柄コード"]
+        cls[c].append(str(v))
+    for c in cls:
+        print c,cls[c]
+
+    return cls.items()
+
+
 if __name__ == "__main__":
     """
+    loadClass("data/company_class.csv")
+    sys.exit(-1)
     nb = NaiveBayes()
     nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'financial'])
-    nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
-    print "...done"
-    nb.train(minfreq=100)
-    print nb
-    nb.save("data/analysis_textcate_basic.pickle")
-
-    nb = NaiveBayes()
-    nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'contract', u'research',u'financial'])
-    nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
-    print "...done"
-    nb.train(minfreq=100)
-    print nb
-    nb.save("data/analysis_textcate_all.pickle")
+    #nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
+    #print "...done"
+    #nb.train(minFreq=100)
+    #print nb
+    #nb.save("data/analysis_textcate_basic.pickle")
     """
 
     nb = NaiveBayes()
     nb.load("data/analysis_textcate_basic.pickle")
-    #nb2.wordInfo(topn=100)
-    wd = nb.wordInfo(fpath="analysis/word_textcate_basic_100.csv"  ,minfreq=100  )
-    nb.evaluate(fpath="analysis/mat_basic_100.csv",wordFilter=wd)
-    wd = nb.wordInfo(fpath="analysis/word_textcate_basic_1000.csv" ,minfreq=1000 )
-    nb.evaluate(fpath="analysis/mat_basic_1000.csv",wordFilter=wd)
-    wd = nb.wordInfo(fpath="analysis/word_textcate_basic_5000.csv" ,minfreq=5000 )
-    nb.evaluate(fpath="analysis/mat_basic_5000.csv",wordFilter=wd)
+    wd = nb.wordInfo(fpath="wordtest.csv",minFreq=100,maxEntropy=-7.599e-2)
+    wd = nb.cleanupWords(wd)
+    nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'financial'])
+    w = nb.dumpWordsByCompany("test2.csv",minFreq=1,topn=10,wordList=wd,classList=loadClass("data/company_class.csv"))
+    w = nb.dumpWordsByCompany("test1.csv",minFreq=1,topn=10,wordList=wd)
+
+    #print w
+    #w = nb.CountWords("1301",minFreq=1,topn=10,wordList=wd,verbose=True)
+    #nb.evaluate(fpath="analysis/mat_basic_100.csv",wordFilter=wd)
