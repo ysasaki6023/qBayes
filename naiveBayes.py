@@ -384,19 +384,28 @@ class NaiveBayes:
 if __name__ == "__main__":
     """
     nb = NaiveBayes()
+    nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'financial'])
+    nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
+    print "...done"
+    nb.train(minfreq=100)
+    print nb
+    nb.save("data/analysis_textcate_basic.pickle")
+
+    nb = NaiveBayes()
     nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'contract', u'research',u'financial'])
     nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"結論")
     print "...done"
     nb.train(minfreq=100)
     print nb
-    nb.save("test.pickle")
+    nb.save("data/analysis_textcate_all.pickle")
     """
 
-    nb2 = NaiveBayes()
-    nb2.load("test.pickle")
-    print nb2
+    nb = NaiveBayes()
+    nb.load("data/analysis_textcate_basic.pickle")
     #nb2.wordInfo(topn=100)
-    wd = nb2.wordInfo(fpath="word.csv",minfreq=500)
-    nb2.evaluate(fpath="mat.csv",wordFilter=wd)
-    #print "log P(1|暖冬) =", nb2.score([u"暖冬"], u"1")
-    #print "log P(X|暖冬) =", nb2.scoreDict([u"暖冬"])
+    wd = nb.wordInfo(fpath="analysis/word_textcate_basic_100.csv"  ,minfreq=100  )
+    nb.evaluate(fpath="analysis/mat_basic_100.csv",wordFilter=wd)
+    wd = nb.wordInfo(fpath="analysis/word_textcate_basic_1000.csv" ,minfreq=1000 )
+    nb.evaluate(fpath="analysis/mat_basic_1000.csv",wordFilter=wd)
+    wd = nb.wordInfo(fpath="analysis/word_textcate_basic_5000.csv" ,minfreq=5000 )
+    nb.evaluate(fpath="analysis/mat_basic_5000.csv",wordFilter=wd)
