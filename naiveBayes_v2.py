@@ -436,13 +436,13 @@ class NaiveBayes:
         line = ["code"] + ["truth"] + ["infer"] + ["word%d"%i for i in range(topn)] + ["count%d"%i for i in range(topn)]
         writer.writerow(line)
 
-
         targetIndex = []
         for index in self.textData:
             targetIndex.append([index,[index]])
 
         cnt = -1
         for title,index in targetIndex:
+            print index
             cnt += 1
             if cnt%10 == 0: print "%d/%d"%(cnt,len(targetIndex))
             truth = self.data[cnt][0]
@@ -513,14 +513,14 @@ class NaiveBayes:
             goodWords.append(w)
         return goodWords
 
-def loadClass(fpath,index):
+def loadClass(fpath):
     d = pd.read_csv(fpath)
     cls = {}
     for i, row in d.iterrows():
         c = row["分類"]
         if not c in cls:
             cls[c] = []
-        v = row[index]
+        v = row["銘柄コード"]
         cls[c].append(str(v))
     for c in cls:
         print c,cls[c]
@@ -541,7 +541,7 @@ if __name__ == "__main__":
     wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-0.4490_beforeCleaning.csv")
     wd = nb.cleanupWords(wd)
     wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-0.4490_afterCleaning.csv" , maxEntropy=-0.4490, wordFilter=wd)
+    nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",wordFilter=None)
     w = nb.dumpWordsByCompany("analysis/v2/wordsByCompany_maxEntropy-0.4490.csv" ,topn=25,wordFilter=wd)
     w = nb.dumpWordsByCompany("analysis/v2/wordsByCategory_maxEntropy-0.4490.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv",index="分類"))
-    nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",wordFilter=None)
     #nb.evaluate(fpath="analysis/v2/mat_basic_maxEntropy-0.4490.csv",wordFilter=wd)
