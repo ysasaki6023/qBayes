@@ -456,7 +456,6 @@ class NaiveBayes:
         f.close()
         return
 
-
     def cleanupWords(self,wordList):
         symbolReg1 = re.compile(u'[︰-＠△①-⑨㈱＜＞;・ｍⅠ-Ⅹ]') # 全角記号
         symbolReg2 = re.compile(r'[!-/:-@[-`{-~]+$') # 半角記号
