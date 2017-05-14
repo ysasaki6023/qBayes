@@ -434,7 +434,7 @@ class NaiveBayes:
         targetIndex = []
         if not classList:
             for index in self.textData:
-                tagetIndex.append([index,[index]])
+                targetIndex.append([index,[index]])
         else:
             targetIndex = classList
 
@@ -466,7 +466,7 @@ class NaiveBayes:
             if symbolReg1.search(w): continue
             if symbolReg2.search(w): continue
             if symbolReg3.search(w): continue
-            if w in [u"億",u"兆",u"付",u"買" ]: continue
+            if w in [u"万",u"億",u"兆",u"付",u"買" ]: continue
             goodWords.append(w)
         return goodWords
 
@@ -500,12 +500,9 @@ if __name__ == "__main__":
 
     nb = NaiveBayes()
     nb.load("data/analysis_textcate_basic.pickle")
-    wd = nb.wordInfo(fpath="wordtest.csv",minFreq=100,maxEntropy=-7.599e-2)
+    wd = nb.wordInfo(fpath="result/wordInfo_minFreq100_maxEntropy-7.599e-2.csv",minFreq=100,maxEntropy=-7.599e-2)
+    #wd = nb.wordInfo(fpath="result/wordInfo_minFreq100.csv",minFreq=100)
     wd = nb.cleanupWords(wd)
     nb.loadTextFile    (fpath="data/mergedEDINET.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'financial'])
-    w = nb.dumpWordsByCompany("test2.csv",minFreq=1,topn=10,wordList=wd,classList=loadClass("data/company_class.csv"))
-    w = nb.dumpWordsByCompany("test1.csv",minFreq=1,topn=10,wordList=wd)
-
-    #print w
-    #w = nb.CountWords("1301",minFreq=1,topn=10,wordList=wd,verbose=True)
-    #nb.evaluate(fpath="analysis/mat_basic_100.csv",wordFilter=wd)
+    w = nb.dumpWordsByCompany("result/wordsByCategory_minFreq1_maxEntropy-7.599e-2.csv",minFreq=1,topn=25,wordList=wd,classList=loadClass("data/company_class.csv"))
+    w = nb.dumpWordsByCompany("result/wordsByCompany_minFreq1_maxEntropy-7.599e-2.csv",minFreq=1,topn=25,wordList=wd)
