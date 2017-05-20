@@ -89,7 +89,7 @@ class NaiveBayes:
                 idx_to_use = [i for i in range(len(row)) if not i == idx_index]
 
             for i,row in enumerate(reader):
-                if i%1000==0: print "..loading: %d"%i
+                if i%100==0: print "..loading: %d"%i
                 index = row[idx_index]
                 line  = ""
                 for i in idx_to_use:
@@ -100,11 +100,11 @@ class NaiveBayes:
                 # Extract word and class
                 words = []
                 while line:
-                    word = line.surface.decode("utf-8", "ignore")
+                    word  = line.surface.decode("utf-8", "ignore")
                     clazz = line.feature.split(',')[0].decode('utf-8', 'ignore')
                     if clazz==u"名詞" and clazz != u'BOS/EOS':
-                        if word.isdigit(): continue
-                        words.append(word)
+                        if not word.isdigit():
+                            words.append(word)
 
                     line = line.next
 
@@ -397,6 +397,7 @@ class NaiveBayes:
             return
         if not type(index)==type([]):
             index = [index]
+
         # 全単語数を計算
         self.vocabcount   = {}
         for idx in index:
@@ -436,19 +437,24 @@ class NaiveBayes:
         line = ["code"] + ["truth"] + ["infer"] + ["word%d"%i for i in range(topn)] + ["count%d"%i for i in range(topn)]
         writer.writerow(line)
 
-        targetIndex = []
-        for index in self.textData:
-            targetIndex.append([index,[index]])
-
         cnt = -1
-        for title,index in targetIndex:
-            print index
+        for index in self.textData:
             cnt += 1
-            if cnt%10 == 0: print "%d/%d"%(cnt,len(targetIndex))
-            truth = self.data[cnt][0]
-            infer = self.test(self.textData[index[0]],wordFilter=wordFilter)
+            if cnt%10 == 0: print "%d/%d"%(cnt,len(self.textData))
+            if not index in self.cateData: continue
+            
+            truth = self.cateData[index]
+
+            res = self.scoreDict(self.textData[index],wordFilter=wordFilter)
+
+            infer = self.test(self.textData[index],wordFilter=wordFilter)
             words = self.CountWords(index,topn=topn,wordFilter=wordFilter,verbose=False)
-            line = [title,truth,infer]
+            line = [index,truth,infer]
+
+            print index,"truth=",truth,"infer=",infer,"  :  ",
+            for x in words:
+                print x[0],
+            print
 
             for w in words: line.append(w[0].encode("utf-8"))
             if len(words)<topn:
@@ -509,7 +515,7 @@ class NaiveBayes:
             if symbolReg1.search(w): continue
             if symbolReg2.search(w): continue
             if symbolReg3.search(w): continue
-            if w in [u"万",u"億",u"兆",u"付",u"買" ]: continue
+            if w in [u"円",u"十",u"百",u"千",u"万",u"億",u"兆",u"付",u"買" ]: continue
             goodWords.append(w)
         return goodWords
 
@@ -538,10 +544,9 @@ if __name__ == "__main__":
 
     nb = NaiveBayes()
     nb.load("data/analysis_textcate_basic_v2.pickle")
-    wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-0.4490_beforeCleaning.csv")
+    wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv")
     wd = nb.cleanupWords(wd)
-    wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-0.4490_afterCleaning.csv" , maxEntropy=-0.4490, wordFilter=wd)
-    nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",wordFilter=None)
-    w = nb.dumpWordsByCompany("analysis/v2/wordsByCompany_maxEntropy-0.4490.csv" ,topn=25,wordFilter=wd)
-    w = nb.dumpWordsByCompany("analysis/v2/wordsByCategory_maxEntropy-0.4490.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv",index="分類"))
-    #nb.evaluate(fpath="analysis/v2/mat_basic_maxEntropy-0.4490.csv",wordFilter=wd)
+    nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",topn=25,wordFilter=wd)
+    w = nb.dumpWordsByCompany("analysis/v2/wordsByCompany_maxEntropy-nolimit.csv" ,topn=25,wordFilter=wd)
+    w = nb.dumpWordsByCompany("analysis/v2/wordsByCategory_maxEntropy-nolimit.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv"))
+    nb.evaluate(fpath="analysis/v2/mat_basic_maxEntropy-nolimit.csv",wordFilter=wd)
