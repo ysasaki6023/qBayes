@@ -210,7 +210,7 @@ class NaiveBayes:
                 self.np_words[idx_cat][idx_word] += 1
         return
     
-    def wordProbAcrossCategories(self, word, wordFilter):
+    def wordScoreAcrossCategories(self, word, wordFilter=None):
         """単語の条件付き確率 P(word|cat) を求める"""
         # 単語の条件付き確率の分母の値をあらかじめ一括計算
         oneNumFlag = False
@@ -220,12 +220,15 @@ class NaiveBayes:
             for cat in self.categories:
                 idx_cat = self.categories.index(cat)
                 self.denominator[idx_cat] = np.sum(self.np_words[idx_cat]) + len(self.vocabularies)
+        #for w in word: print w,
+        #print
 
         # ラプラススムージング
         wd_idx = np.zeros(len(word),dtype=np.int32)
         mk_idx = np.zeros(len(word),dtype=np.bool)
         if wordFilter: wordFilter_lookup = {w:True for w in wordFilter}
         else         : wordFilter_lookup = None
+
         for i,w in enumerate(word):
             idx = 0 # dummy
             mk_idx[i] = True
@@ -236,23 +239,21 @@ class NaiveBayes:
             wd_idx[i] = idx
 
         nominator = self.np_words[:,wd_idx] # (all categories) x (words in doc)
-        #print nominator.shape,self.denominator.shape
-        nominator[:,mk_idx] = 0. # replace dummy number by 0.
-        #val =  (nominator + 1.) / np.repeat(self.denominator.expand_dims(axis=1),nominator.shape[1],axis=1)
-        #val =  (nominator + 1.) / self.denominator
-        #print nominator
-        #print nominator+1
-        #print self.denominator
-        val =  (nominator + 1.) / np.expand_dims(self.denominator,axis=1)
-        #print val
-
-        return val
+        #nominator[:,mk_idx] = 0. # replace dummy number by 0.
+        val  =  (nominator + 1.) / np.expand_dims(self.denominator,axis=1)
+        #val[:,mk_idx] = 0. # replace dummy number by 0.
+        val    = val[:,mk_idx==False]
+        wd_idx = wd_idx[mk_idx==False]
+        mk_idx = mk_idx[mk_idx==False]
+        #for i,c in enumerate(self.categories):
+        #    print c,word[0],"%.2e"%val[i,0]
+        return val,wd_idx,mk_idx
 
     def wordProb(self, word, cat, wordFilter):
         oneNumFlag = False
         if not type(word) == type([]): word,oneNumFlag = [word],True
 
-        val = self.wordProbAcrossCategories(word,wordFilter)
+        val = self.wordScoreAcrossCategories(word,wordFilter)[0]
 
         if oneNumFlag: return val[self.categories.index(cat)][0]
         else         : return val[self.categories.index(cat)]
@@ -280,32 +281,34 @@ class NaiveBayes:
     def scoreList(self,doc,wordFilter=None):
         scoreCat = []
         score  = np.log(self.np_categ.astype(np.float32)/np.sum(self.np_categ).astype(np.float32))  # log P(cat)
-        score += np.sum( np.log(self.wordProbAcrossCategories( doc, wordFilter ) ),axis=1 ) # sum log P(doc|cat)
+        score += np.sum( np.log( self.wordScoreAcrossCategories( doc, wordFilter )[0] ), axis=1 ) # sum log P(doc|cat)
+        #for i,s in enumerate(np.sum( np.log( self.wordScoreAcrossCategories( doc, wordFilter )[0] ), axis=1 )):
+        #    print self.categories[i],s
         for i,c in enumerate(self.categories):
             scoreCat.append(score[i])
 
         return scoreCat
 
-    #def probDict(self,doc,wordFilter=None):
-    #    probCat = self.probList(doc,wordFilter)
-    #    probDict = {}
-    #    for i, cat in enumerate(self.categories):
-    #        probDict[cat] = probCat[i]
-    #    return probDict
+    def powerWord(self,doc,cat,wordFilter=None):
+        val,wd_idx,mk_idx = self.wordScoreAcrossCategories( doc, wordFilter )
+        val = np.log(val)
+        
+        summary = {}
+        for i in range(val.shape[1]):
+            if mk_idx[i]: continue
+            word = doc[i]
+            if not word in summary: summary[word] = 0.
+            summary[word] = (val[self.categories.index(cat),i] - np.mean(val,axis=0)[i])
 
-    #def probList(self,doc,wordFilter=None):
-    #    probCat = []
-    #    for c in self.categories:
-    #        probCat.append(math.exp(self.score(doc,c,wordFilter)))
-    #    total = sum(probCat)
-    #    for i,c in enumerate(self.categories):
-    #        probCat[i] /= total
-    #    return probCat
-    
+        #for w,v in sorted(summary.items(), key=lambda x: x[1])[::-1]:
+        #    print w,v
+
+        return
+
     def score(self, doc, cat, wordFilter=None):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
         score  = np.log(self.np_categ[self.categories.index(cat)].astype(np.float32)/np.sum(self.np_categ).astype(np.float32))  # log P(cat)
-        score += np.sum( np.log(self.wordProb( doc, cat, wordFilter ) ) ) # sum log P(doc|cat)
+        score += np.sum( np.log(self.wordProb( doc, cat, wordFilter )[0] ) ) # sum log P(doc|cat)
         return score
 
     def applyFilter(self, doc, wordFilter=None):
@@ -350,7 +353,6 @@ class NaiveBayes:
                     w.writerow(line)
 
         pass
-
     
     def wordInfo(self,fpath=None,topn=None,minFreq=None,maxEntropy=None, wordFilter=None):
         """単語の性質を出力"""
@@ -470,15 +472,15 @@ class NaiveBayes:
 
             infer  = sorted(pro.items(), key=lambda x:x[1])[::-1]
 
-            #infer = self.test(self.textData[index],wordFilter=wordFilter)
             words = self.CountWords(index,topn=topn,wordFilter=wordFilter,verbose=False)
-            line = [index,truth,infer]
+            line = [index,truth,infer[0][0]]
 
             print index,"truth=",truth,"infer= %s(%.1f%%)"%(infer[0][0],infer[0][1]*100.),", %s(%.1f%%)"%(infer[1][0],infer[1][1]*100.),"  :  ",
             for k,x in enumerate(words):
                 if k>5: break
                 print x[0],
             print
+            #self.powerWord(self.textData[index],infer[0][0],wordFilter=wordFilter)
 
             for w in words: line.append(w[0].encode("utf-8"))
             if len(words)<topn:
@@ -532,13 +534,16 @@ class NaiveBayes:
 
     def cleanupWords(self,wordFilter):
         symbolReg1 = re.compile(u'[︰-＠①-⑨Ⅰ-Ⅹ]|△|㈱|－|＜|＞|;|・|ｍ') # 全角記号
-        symbolReg2 = re.compile(r'[!-/:-@\[-`{-~]|&|\*|#|;') # 半角記号
+        #symbolReg2 = re.compile(r'[!-/:-@\[-`{-~]|&|\*|#|;') # 半角記号
+        symbolReg2 = re.compile(r'[!-/:-@\[-`{-~]') # 半角記号
         symbolReg3 = re.compile(r'^[a-zA-Z]$') # 半角英数一文字
+        symbolReg4 = re.compile(r',') # 半角記号
         goodWords = []
         for w in wordFilter:
             if symbolReg1.search(w): continue
             if symbolReg2.search(w): continue
             if symbolReg3.search(w): continue
+            if symbolReg4.search(w): continue
             if w in [u"円",u"十",u"百",u"千",u"万",u"億",u"兆",u"付",u"買" ]: continue
             goodWords.append(w)
         return goodWords
@@ -567,10 +572,20 @@ if __name__ == "__main__":
     #nb.save("data/analysis_textcate_basic_v2.pickle")
 
     nb = NaiveBayes()
+
     nb.load("data/analysis_textcate_basic_v2.pickle")
-    #wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv",maxEntropy=+0.1)
+    #val,_,_ = nb.wordScoreAcrossCategories([u"在庫",u"当行"])
+
+    #for i,c in enumerate(nb.categories):
+    #    print c,val[i]
+    #print val.shape,len(nb.categories)
+    #sys.exit(-1)
+    #wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv",maxEntropy=-0.0)
     wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv")
     wd = nb.cleanupWords(wd)
+    #wd = [u"当行"]
+    #wd = [u"電灯"]
+    #wd = [u"papapapap"]
     nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",topn=25,wordFilter=wd)
     w = nb.dumpWordsByCompany("analysis/v2/wordsByCompany_maxEntropy-nolimit.csv" ,topn=25,wordFilter=wd)
     w = nb.dumpWordsByCompany("analysis/v2/wordsByCategory_maxEntropy-nolimit.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv"))
