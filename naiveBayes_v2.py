@@ -210,17 +210,6 @@ class NaiveBayes:
                 self.np_words[idx_cat][idx_word] += 1
         return
     
-    def classify(self, doc):
-        """事後確率の対数 log(P(cat|doc)) がもっとも大きなカテゴリを返す"""
-        best = None
-        mmax = -sys.maxint
-        for cat in self.catcount.keys():
-            p = self.score(doc, cat)
-            if p > mmax:
-                mmax = p
-                best = cat
-        return best
-    
     def wordProb(self, word, cat, wordFilter):
         """単語の条件付き確率 P(word|cat) を求める"""
         # 単語の条件付き確率の分母の値をあらかじめ一括計算
@@ -251,6 +240,19 @@ class NaiveBayes:
 
         if oneNumFlag: return val[0]
         else         : return val
+
+    def convertToProb(self,scoreDict):
+        res = np.zeros(len(scoreDict),dtype=np.float32)
+        for i,k in enumerate(scoreDict):
+            res[i] = scoreDict[k]
+        res -= np.max(res)
+        res  = np.exp(res)
+        res /= np.sum(res)
+
+        ret = {}
+        for i,k in enumerate(scoreDict):
+            ret[k] = res[i]
+        return ret
 
     def scoreDict(self,doc,wordFilter=None):
         scoreCat = self.scoreList(doc,wordFilter)
@@ -283,7 +285,6 @@ class NaiveBayes:
     
     def score(self, doc, cat, wordFilter=None):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
-        #doc = self.applyFilter(doc, wordFilter)
         score  = np.log(self.np_categ[self.categories.index(cat)])/np.sum(self.np_categ)  # log P(cat)
         score += np.sum( np.log(self.wordProb( doc, cat, wordFilter ) ) ) # sum log P(doc|cat)
         return score
@@ -446,13 +447,17 @@ class NaiveBayes:
             truth = self.cateData[index]
 
             res = self.scoreDict(self.textData[index],wordFilter=wordFilter)
+            pro = self.convertToProb(res)
 
-            infer = self.test(self.textData[index],wordFilter=wordFilter)
+            infer  = sorted(pro.items(), key=lambda x:x[1])[::-1]
+
+            #infer = self.test(self.textData[index],wordFilter=wordFilter)
             words = self.CountWords(index,topn=topn,wordFilter=wordFilter,verbose=False)
             line = [index,truth,infer]
 
-            print index,"truth=",truth,"infer=",infer,"  :  ",
-            for x in words:
+            print index,"truth=",truth,"infer= %s(%.1f%%)"%(infer[0][0],infer[0][1]*100.),", %s(%.1f%%)"%(infer[1][0],infer[1][1]*100.),"  :  ",
+            for k,x in enumerate(words):
+                if k>5: break
                 print x[0],
             print
 
@@ -544,6 +549,7 @@ if __name__ == "__main__":
 
     nb = NaiveBayes()
     nb.load("data/analysis_textcate_basic_v2.pickle")
+    #wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv",maxEntropy=+0.1)
     wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv")
     wd = nb.cleanupWords(wd)
     nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",topn=25,wordFilter=wd)
