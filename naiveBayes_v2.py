@@ -210,7 +210,7 @@ class NaiveBayes:
                 self.np_words[idx_cat][idx_word] += 1
         return
     
-    def wordProb(self, word, cat, wordFilter):
+    def wordProbAcrossCategories(self, word, wordFilter):
         """単語の条件付き確率 P(word|cat) を求める"""
         # 単語の条件付き確率の分母の値をあらかじめ一括計算
         oneNumFlag = False
@@ -220,6 +220,7 @@ class NaiveBayes:
             for cat in self.categories:
                 idx_cat = self.categories.index(cat)
                 self.denominator[idx_cat] = np.sum(self.np_words[idx_cat]) + len(self.vocabularies)
+
         # ラプラススムージング
         wd_idx = np.zeros(len(word),dtype=np.int32)
         mk_idx = np.zeros(len(word),dtype=np.bool)
@@ -234,12 +235,27 @@ class NaiveBayes:
                     mk_idx[i] = False
             wd_idx[i] = idx
 
-        nominator = self.np_words[self.categories.index(cat),wd_idx]
-        nominator[mk_idx] = 0.
-        val =  (nominator + 1.) / self.denominator[self.categories.index(cat)]
+        nominator = self.np_words[:,wd_idx] # (all categories) x (words in doc)
+        #print nominator.shape,self.denominator.shape
+        nominator[:,mk_idx] = 0. # replace dummy number by 0.
+        #val =  (nominator + 1.) / np.repeat(self.denominator.expand_dims(axis=1),nominator.shape[1],axis=1)
+        #val =  (nominator + 1.) / self.denominator
+        #print nominator
+        #print nominator+1
+        #print self.denominator
+        val =  (nominator + 1.) / np.expand_dims(self.denominator,axis=1)
+        #print val
 
-        if oneNumFlag: return val[0]
-        else         : return val
+        return val
+
+    def wordProb(self, word, cat, wordFilter):
+        oneNumFlag = False
+        if not type(word) == type([]): word,oneNumFlag = [word],True
+
+        val = self.wordProbAcrossCategories(word,wordFilter)
+
+        if oneNumFlag: return val[self.categories.index(cat)][0]
+        else         : return val[self.categories.index(cat)]
 
     def convertToProb(self,scoreDict):
         res = np.zeros(len(scoreDict),dtype=np.float32)
@@ -261,31 +277,34 @@ class NaiveBayes:
             scoreDict[cat] = scoreCat[i]
         return scoreDict
 
-    def probDict(self,doc,wordFilter=None):
-        probCat = self.probList(doc,wordFilter)
-        probDict = {}
-        for i, cat in enumerate(self.categories):
-            probDict[cat] = probCat[i]
-        return probDict
-
     def scoreList(self,doc,wordFilter=None):
         scoreCat = []
-        for c in self.categories:
-            scoreCat.append(self.score(doc,c,wordFilter))
+        score  = np.log(self.np_categ.astype(np.float32)/np.sum(self.np_categ).astype(np.float32))  # log P(cat)
+        score += np.sum( np.log(self.wordProbAcrossCategories( doc, wordFilter ) ),axis=1 ) # sum log P(doc|cat)
+        for i,c in enumerate(self.categories):
+            scoreCat.append(score[i])
+
         return scoreCat
 
-    def probList(self,doc,wordFilter=None):
-        probCat = []
-        for c in self.categories:
-            probCat.append(math.exp(self.score(doc,c,wordFilter)))
-        total = sum(probCat)
-        for i,c in enumerate(self.categories):
-            probCat[i] /= total
-        return probCat
+    #def probDict(self,doc,wordFilter=None):
+    #    probCat = self.probList(doc,wordFilter)
+    #    probDict = {}
+    #    for i, cat in enumerate(self.categories):
+    #        probDict[cat] = probCat[i]
+    #    return probDict
+
+    #def probList(self,doc,wordFilter=None):
+    #    probCat = []
+    #    for c in self.categories:
+    #        probCat.append(math.exp(self.score(doc,c,wordFilter)))
+    #    total = sum(probCat)
+    #    for i,c in enumerate(self.categories):
+    #        probCat[i] /= total
+    #    return probCat
     
     def score(self, doc, cat, wordFilter=None):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
-        score  = np.log(self.np_categ[self.categories.index(cat)])/np.sum(self.np_categ)  # log P(cat)
+        score  = np.log(self.np_categ[self.categories.index(cat)].astype(np.float32)/np.sum(self.np_categ).astype(np.float32))  # log P(cat)
         score += np.sum( np.log(self.wordProb( doc, cat, wordFilter ) ) ) # sum log P(doc|cat)
         return score
 
