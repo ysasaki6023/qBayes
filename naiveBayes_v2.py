@@ -220,12 +220,11 @@ class NaiveBayes:
             for cat in self.categories:
                 idx_cat = self.categories.index(cat)
                 self.denominator[idx_cat] = np.sum(self.np_words[idx_cat]) + len(self.vocabularies)
-        #for w in word: print w,
-        #print
 
         # ラプラススムージング
         wd_idx = np.zeros(len(word),dtype=np.int32)
         mk_idx = np.zeros(len(word),dtype=np.bool)
+        goodWords = []
         if wordFilter: wordFilter_lookup = {w:True for w in wordFilter}
         else         : wordFilter_lookup = None
 
@@ -236,18 +235,15 @@ class NaiveBayes:
                 if (not wordFilter_lookup) or (wordFilter_lookup and w in wordFilter_lookup):
                     idx = self.vocab_lookup[w]
                     mk_idx[i] = False
+                    goodWords.append(w)
             wd_idx[i] = idx
 
         nominator = self.np_words[:,wd_idx] # (all categories) x (words in doc)
-        #nominator[:,mk_idx] = 0. # replace dummy number by 0.
         val  =  (nominator + 1.) / np.expand_dims(self.denominator,axis=1)
-        #val[:,mk_idx] = 0. # replace dummy number by 0.
         val    = val[:,mk_idx==False]
         wd_idx = wd_idx[mk_idx==False]
         mk_idx = mk_idx[mk_idx==False]
-        #for i,c in enumerate(self.categories):
-        #    print c,word[0],"%.2e"%val[i,0]
-        return val,wd_idx,mk_idx
+        return val,wd_idx,goodWords
 
     def wordProb(self, word, cat, wordFilter):
         oneNumFlag = False
@@ -282,28 +278,21 @@ class NaiveBayes:
         scoreCat = []
         score  = np.log(self.np_categ.astype(np.float32)/np.sum(self.np_categ).astype(np.float32))  # log P(cat)
         score += np.sum( np.log( self.wordScoreAcrossCategories( doc, wordFilter )[0] ), axis=1 ) # sum log P(doc|cat)
-        #for i,s in enumerate(np.sum( np.log( self.wordScoreAcrossCategories( doc, wordFilter )[0] ), axis=1 )):
-        #    print self.categories[i],s
         for i,c in enumerate(self.categories):
             scoreCat.append(score[i])
 
         return scoreCat
 
     def powerWord(self,doc,cat,wordFilter=None):
-        val,wd_idx,mk_idx = self.wordScoreAcrossCategories( doc, wordFilter )
+        val,wd_idx,goodWords = self.wordScoreAcrossCategories( doc, wordFilter )
         val = np.log(val)
         
         summary = {}
-        for i in range(val.shape[1]):
-            if mk_idx[i]: continue
-            word = doc[i]
+        for i,word in enumerate(goodWords):
             if not word in summary: summary[word] = 0.
             summary[word] = (val[self.categories.index(cat),i] - np.mean(val,axis=0)[i])
 
-        #for w,v in sorted(summary.items(), key=lambda x: x[1])[::-1]:
-        #    print w,v
-
-        return
+        return sorted(summary.items(), key=lambda x: x[1])[::-1]
 
     def score(self, doc, cat, wordFilter=None):
         """文書が与えられたときのカテゴリの事後確率の対数 log(P(cat|doc)) を求める"""
@@ -339,7 +328,6 @@ class NaiveBayes:
             t, x = catdog
             y = self.test(x,wordFilter)
             mat[self.categories.index(t),self.categories.index(y)] += 1
-
         print
         print mat
 
@@ -351,7 +339,6 @@ class NaiveBayes:
                 for k in range(nCat):
                     line = [self.categories[k]] + [mat[k,j] for j in range(nCat)]
                     w.writerow(line)
-
         pass
     
     def wordInfo(self,fpath=None,topn=None,minFreq=None,maxEntropy=None, wordFilter=None):
@@ -469,26 +456,26 @@ class NaiveBayes:
 
             res = self.scoreDict(self.textData[index],wordFilter=wordFilter)
             pro = self.convertToProb(res)
-
             infer  = sorted(pro.items(), key=lambda x:x[1])[::-1]
 
-            words = self.CountWords(index,topn=topn,wordFilter=wordFilter,verbose=False)
             line = [index,truth,infer[0][0]]
 
             print index,"truth=",truth,"infer= %s(%.1f%%)"%(infer[0][0],infer[0][1]*100.),", %s(%.1f%%)"%(infer[1][0],infer[1][1]*100.),"  :  ",
-            for k,x in enumerate(words):
-                if k>5: break
-                print x[0],
+            pw = self.powerWord(self.textData[index],infer[0][0],wordFilter=wordFilter)
+            pwCnt = 0
+            for w,v in pw:
+                if pwCnt>3: break
+                print "%s=%.2f,"%(w,v),
+                pwCnt+=1
             print
-            #self.powerWord(self.textData[index],infer[0][0],wordFilter=wordFilter)
 
-            for w in words: line.append(w[0].encode("utf-8"))
-            if len(words)<topn:
-                for i in range(topn-len(words)): line.append("")
+            for w in pw: line.append(w[0].encode("utf-8"))
+            if len(pw)<topn:
+                for i in range(topn-len(pw)): line.append("")
 
-            for w in words: line.append(w[1])
-            if len(words)<topn:
-                for i in range(topn-len(words)): line.append(0)
+            for w in pw: line.append(w[1])
+            if len(pw)<topn:
+                for i in range(topn-len(pw)): line.append("")
 
             writer.writerow(line)
         f.close()
@@ -533,18 +520,22 @@ class NaiveBayes:
         return
 
     def cleanupWords(self,wordFilter):
-        symbolReg1 = re.compile(u'[︰-＠①-⑨Ⅰ-Ⅹ]|△|㈱|－|＜|＞|;|・|ｍ') # 全角記号
+        symbolReg1 = re.compile(u'[︰-＠①-⑨Ⅰ-Ⅹ]|△|㈱|－|＜|＞|;|ｍ') # 全角記号
         #symbolReg2 = re.compile(r'[!-/:-@\[-`{-~]|&|\*|#|;') # 半角記号
         symbolReg2 = re.compile(r'[!-/:-@\[-`{-~]') # 半角記号
-        symbolReg3 = re.compile(r'^[a-zA-Z]$') # 半角英数一文字
-        symbolReg4 = re.compile(r',') # 半角記号
+        symbolReg3 = re.compile(r'^[a-zA-Z]*$') # 半角英数一文字
+        symbolReg4 = re.compile(r',|;|\.') # 半角記号
         goodWords = []
+        print "removed:"
         for w in wordFilter:
-            if symbolReg1.search(w): continue
-            if symbolReg2.search(w): continue
-            if symbolReg3.search(w): continue
-            if symbolReg4.search(w): continue
-            if w in [u"円",u"十",u"百",u"千",u"万",u"億",u"兆",u"付",u"買" ]: continue
+            if symbolReg1.search(w) or symbolReg2.search(w) or symbolReg3.search(w) or symbolReg4.search(w):
+                print w,
+                continue
+            #if symbolReg2.search(w):
+            #    continue
+            #if symbolReg3.search(w): continue
+            #if symbolReg4.search(w): continue
+            if w in [u"円",u"十",u"百",u"千",u"万",u"億",u"兆",u"付",u"買",u")－(",u"CO",u"LTD",u"",u".,",u"―&#",u"㎡",u";【",u"）(",u"i",u"+",u".　",u"%）" ]: continue
             goodWords.append(w)
         return goodWords
 
@@ -574,19 +565,11 @@ if __name__ == "__main__":
     nb = NaiveBayes()
 
     nb.load("data/analysis_textcate_basic_v2.pickle")
-    #val,_,_ = nb.wordScoreAcrossCategories([u"在庫",u"当行"])
 
-    #for i,c in enumerate(nb.categories):
-    #    print c,val[i]
-    #print val.shape,len(nb.categories)
-    #sys.exit(-1)
-    #wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv",maxEntropy=-0.0)
-    wd = nb.wordInfo(fpath="analysis/v2/wordInfo_maxEntropy-nolimit_beforeCleaning.csv")
+    wd = nb.wordInfo(fpath="analysis/v3/wordInfo_maxEntropy_nolimit_beforeCleaning.csv")
     wd = nb.cleanupWords(wd)
-    #wd = [u"当行"]
-    #wd = [u"電灯"]
-    #wd = [u"papapapap"]
-    nb.TestByCompany(fpath="analysis/v2/test_by_company.csv",topn=25,wordFilter=wd)
-    w = nb.dumpWordsByCompany("analysis/v2/wordsByCompany_maxEntropy-nolimit.csv" ,topn=25,wordFilter=wd)
-    w = nb.dumpWordsByCompany("analysis/v2/wordsByCategory_maxEntropy-nolimit.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv"))
-    nb.evaluate(fpath="analysis/v2/mat_basic_maxEntropy-nolimit.csv",wordFilter=wd)
+    wd = nb.wordInfo(fpath="analysis/v3/wordInfo_maxEntropy_-0.45_afterCleaning.csv",maxEntropy=-0.45)
+    nb.evaluate(fpath="analysis/v3/mat_basic_maxEntropy_-0.45.csv",wordFilter=wd)
+    nb.TestByCompany(fpath="analysis/v3/test_by_company_maxEntropy_-0.45.csv",topn=25,wordFilter=wd)
+    w = nb.dumpWordsByCompany("analysis/v3/wordsByCompany_maxEntropy_-0.45.csv" ,topn=25,wordFilter=wd)
+    w = nb.dumpWordsByCompany("analysis/v3/wordsByCategory_maxEntropy_-0.45.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv"))
