@@ -469,11 +469,11 @@ class NaiveBayes:
                 pwCnt+=1
             print
 
-            for w in pw: line.append(w[0].encode("utf-8"))
+            for w in pw[:min(len(pw),topn)]: line.append(w[0].encode("utf-8"))
             if len(pw)<topn:
                 for i in range(topn-len(pw)): line.append("")
 
-            for w in pw: line.append(w[1])
+            for w in pw[:min(len(pw),topn)]: line.append(w[1])
             if len(pw)<topn:
                 for i in range(topn-len(pw)): line.append("")
 
@@ -569,7 +569,7 @@ if __name__ == "__main__":
     wd = nb.wordInfo(fpath="analysis/v3/wordInfo_maxEntropy_nolimit_beforeCleaning.csv")
     wd = nb.cleanupWords(wd)
     wd = nb.wordInfo(fpath="analysis/v3/wordInfo_maxEntropy_-0.45_afterCleaning.csv",maxEntropy=-0.45)
-    nb.evaluate(fpath="analysis/v3/mat_basic_maxEntropy_-0.45.csv",wordFilter=wd)
+    #nb.evaluate(fpath="analysis/v3/mat_basic_maxEntropy_-0.45.csv",wordFilter=wd)
     nb.TestByCompany(fpath="analysis/v3/test_by_company_maxEntropy_-0.45.csv",topn=25,wordFilter=wd)
-    w = nb.dumpWordsByCompany("analysis/v3/wordsByCompany_maxEntropy_-0.45.csv" ,topn=25,wordFilter=wd)
-    w = nb.dumpWordsByCompany("analysis/v3/wordsByCategory_maxEntropy_-0.45.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv"))
+    #w = nb.dumpWordsByCompany("analysis/v3/wordsByCompany_maxEntropy_-0.45.csv" ,topn=25,wordFilter=wd)
+    #w = nb.dumpWordsByCompany("analysis/v3/wordsByCategory_maxEntropy_-0.45.csv",topn=25,wordFilter=wd,classList=loadClass("data/company_class.csv"))
