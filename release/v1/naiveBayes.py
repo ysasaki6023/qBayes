@@ -6,6 +6,9 @@ from collections import defaultdict
 import os
 import cPickle as pickle
 import pandas as pd
+import codecs
+
+DEBUGMODE=False
 
 class NaiveBayes:
     """Multinomial Naive Bayes"""
@@ -17,6 +20,7 @@ class NaiveBayes:
         self.cateData = {}
         self.cacheDir = "cache"
         self.data = None
+        self.dictToKeep = {} # minFreqなどでも消えないように一部単語を保存
     
     def __str__(self):
         return "vocabularies: %d, categories: %d" % (len(self.vocabularies), len(self.categories))
@@ -34,6 +38,7 @@ class NaiveBayes:
         p["cateFile_fpath"] = self.cateFile_fpath
         p["cateFile_index_column"]  = self.cateFile_index_column
         p["cateFile_column_to_use"] = self.cateFile_column_to_use
+        p["textData"] = self.textData
 
         with open(fpath,"wb") as f:
             pickle.dump(p,f,protocol=2)
@@ -47,6 +52,7 @@ class NaiveBayes:
         self.vocab_lookup = p["vocab_lookup"]
         self.np_words     = p["np_words"]
         self.np_categ     = p["np_categ"]
+        self.textData     = p["textData"]
         self.textFile_fpath         = p["textFile_fpath"]
         self.textFile_index_column  = p["textFile_index_column"]
         self.textFile_columns_to_use = p["textFile_columns_to_use"]
@@ -56,21 +62,21 @@ class NaiveBayes:
 
         return
 
-    def loadTextFile(self,fpath,index_column,columns_to_use=None):
-
+    def addTextFile(self,fpath,index_column,columns_to_use=None,applyMecab=True,minFreq=None):
         self.textFile_fpath          = fpath
         self.textFile_index_column   = index_column
         self.textFile_columns_to_use = columns_to_use
 
-        cacheName = fpath+index_column.encode("utf-8")+"".join([x.encode("utf-8") for x in columns_to_use])+"_text"
-        cacheName = cacheName.replace("/","").replace(".","").replace("[","").replace("]","").replace(",","").replace("'","").replace(" ","")
-        cacheFname = os.path.join(self.cacheDir,cacheName+".pickle")
-        if not os.path.exists(self.cacheDir):
-            os.makedirs(self.cacheDir)
-        if os.path.exists(cacheFname):
-            with open(cacheFname,"rb") as f:
-                self.textData = pickle.load(f)
-            return
+        #if applyMecab: # Mecabを使わないケースの場合にはキャッシュは使用しない（頻繁に変更されることが予想されるので、安全のため）
+        #    cacheName = fpath+index_column.encode("utf-8")+"".join([x.encode("utf-8") for x in columns_to_use])+"_text"
+        #    cacheName = cacheName.replace("/","").replace(".","").replace("[","").replace("]","").replace(",","").replace("'","").replace(" ","")
+        #    cacheFname = os.path.join(self.cacheDir,cacheName+".pickle")
+        #    if not os.path.exists(self.cacheDir):
+        #        os.makedirs(self.cacheDir)
+        #    if os.path.exists(cacheFname):
+        #        with open(cacheFname,"rb") as f:
+        #            self.textData = pickle.load(f)
+        #        return
 
         self.textFile_index_column   = index_column
         self.textFile_columns_to_use = columns_to_use
@@ -86,29 +92,75 @@ class NaiveBayes:
             else:
                 idx_to_use = [i for i in range(len(row)) if not i == idx_index]
 
+
+            myTextData = {}
             for i,row in enumerate(reader):
                 if i%100==0: print "..loading: %d"%i
+                if DEBUGMODE and i>10: break
                 index = row[idx_index]
-                line  = ""
-                for i in idx_to_use:
-                    line += row[i]+" "
+                #if not index in self.textData: self.textData[index] = []
+                myTextData[index] = []
+                if applyMecab:
+                    line  = ""
+                    for i in idx_to_use:
+                        line += row[i]+" "
 
-                ## Wakachi-gaki
-                line = tagger.parseToNode(line)
-                # Extract word and class
-                words = []
-                while line:
-                    word  = line.surface.decode("utf-8", "ignore")
-                    clazz = line.feature.split(',')[0].decode('utf-8', 'ignore')
-                    if clazz==u"名詞" and clazz != u'BOS/EOS':
-                        if not word.isdigit():
-                            words.append(word)
+                    ## Wakachi-gaki
+                    line = tagger.parseToNode(line)
+                    # Extract word and class
+                    words = []
+                    while line:
+                        word  = line.surface.decode("utf-8", "ignore")
+                        clazz = line.feature.split(',')[0].decode('utf-8', 'ignore')
+                        if clazz==u"名詞" and clazz != u'BOS/EOS':
+                            if not word.isdigit():
+                                words.append(word)
 
-                    line = line.next
+                        line = line.next
 
-                self.textData[index] = words
-        with open(cacheFname,"wb") as f:
-            pickle.dump(self.textData,f,protocol=2)
+                    #self.textData[index].extend(words)
+                    myTextData[index] = words
+                else:
+                    words = []
+                    for i in idx_to_use:
+                        words.append(row[i])
+                    myTextData[index] = words
+                    #self.textData[index].extend(words)
+
+        # 出現頻度の少ない単語の除去
+        if minFreq:
+            myVocabCount = {}
+            print
+            vc   = {}
+            cnt = -1
+            for idx in myTextData:
+                cnt += 1
+                if cnt%1000==0: print "..counting words %d/%d"%(cnt,len(myTextData))
+                for word in myTextData[idx]:
+                    if not word in myVocabCount: myVocabCount[word] = 0
+                    myVocabCount[word] += 1
+            origNum = len(myVocabCount)
+            print
+            dictList = myVocabCount.keys()
+            newTextData = {}
+            for idx in myTextData:
+                #newTextData[idx] = []
+                if not idx in self.textData : self.textData[idx] = []
+                for i,w in enumerate(myTextData[idx]):
+                    if myVocabCount[w]>=minFreq:
+                        #newTextData[idx].append(w)
+                        self.textData[idx].append(w)
+                        #del myTextData[idx][i]
+            print newTextData
+            print "..found %d words originally, which is reduced to %d under minFreq=%d"%(origNum,len(myVocabCount),minFreq)
+        else:
+            for idx in myTextData:
+                if not idx in self.textData : self.textData[idx] = []
+                self.textData[idx] += myTextData[idx]
+
+        #if applyMecab:
+        #    with open(cacheFname,"wb") as f:
+        #        pickle.dump(self.textData,f,protocol=2)
         return
 
     def loadCategoryFile(self,fpath,index_column,column_to_use):
@@ -120,7 +172,7 @@ class NaiveBayes:
         self.catefile_index_column   = index_column
         self.catefile_column_to_use = column_to_use
 
-        cacheName = fpath+index_column.encode("utf-8")+column_to_use.encode("utf-8")+"_cate"
+        cacheName = fpath+index_column+column_to_use+"_cate"
         cacheName = cacheName.replace("/","").replace(".","").replace("[","").replace("]","").replace(",","").replace("'","").replace(" ","")
         cacheFname = os.path.join(self.cacheDir,cacheName+".pickle")
         if not os.path.exists(self.cacheDir):
@@ -133,7 +185,7 @@ class NaiveBayes:
         with open(fpath, 'r') as f:
             reader = csv.reader(f)
             header = next(reader)
-            header = [x.decode("utf-8") for x in header]
+            #header = [x.decode("utf-8") for x in header]
             idx_index  = header.index(index_column)
             idx_to_use = header.index(column_to_use)
 
@@ -179,15 +231,6 @@ class NaiveBayes:
                 if not word in self.vocabcount: self.vocabcount[word] = 0
                 self.vocabcount[word] += 1
         origNum = len(self.vocabcount)
-        print
-        if minFreq:
-            dictList = self.vocabcount.keys()
-            for w in dictList:
-                if self.vocabcount[w]<minFreq:
-                    del self.vocabcount[w]
-            print "..found %d words originally, which is reduced to %d under minFreq=%d"%(origNum,len(self.vocabcount),minFreq)
-        else:
-            print "..found %d words"%origNum
         self.vocabularies = list(self.vocabcount.keys())
         self.vocab_lookup = {w:i for i,w in enumerate(self.vocabularies)}
 
@@ -379,17 +422,28 @@ class NaiveBayes:
             if wordFilter and (not self.vocabularies[wordidx[i]] in wordFilter): continue
             cnt += 1
             if fpath:
-                line = [cnt,self.vocabularies[wordidx[i]].encode("utf-8")] # vocabularies -> need to sort, thus use wordidx
+                line = [cnt,self.vocabularies[wordidx[i]]] # vocabularies -> need to sort, thus use wordidx
                 line.append(entropy[i]) # entropy -> already sorted
                 for j in range(len(self.categories)): line.append(wcounts[j,i]) # wcounts -> already sorted
                 for j in range(len(self.categories)): line.append(wcounts[j,i].astype(np.float32)/np.sum(wcounts[:,i]))
-                writer.writerow(line)
+                writer.writerow([unicode(x).encode("shift-jis","ignore") for x in self.unicodeCvt(line)])
+                #writer.writerow([unicode(x,"utf-8").encode("shift-jis","ignore") for x in line])
             else:
                 print "%8d  H(%20s) = %.3e"%(cnt,self.vocabularies[wordidx[i]],entropy[i])
 
         if fpath: f.close()
 
         return [self.vocabularies[wordidx[i]] for i in range(len(wordidx))]
+
+    def unicodeCvt(self,line):
+        myline = []
+        for x in line:
+            try:
+                myline.append(unicode(x,"utf-8"))
+            except:
+                myline.append(x)
+        return myline
+        #writer.writerow([unicode(x,"utf-8").encode("shift-jis","ignore") for x in line])
 
     def countWords(self,index,topn=None,wordFilter=None,verbose=True):
         if not self.textData:
@@ -424,13 +478,15 @@ class NaiveBayes:
 
         return ret
 
-    def TestByCompany(self,fpath,topn=10,wordFilter=None):
+    def TestByCompany(self,fpath,topn=10,wordFilter=None,verbose=False):
         print "TestByCompany()"
-        print "load data.."
-        if not self.textData: self.loadTextFile(self.textFile_fpath,self.textFile_index_column,self.textFile_columns_to_use)
         if not self.cateData: self.loadCategoryFile(self.cateFile_fpath,self.cateFile_index_column,self.cateFile_column_to_use)
         if not self.data    : self.buildData()
-        print "..done"
+        exclData = []
+        for index in self.textData:
+            if not index in self.cateData:
+                if verbose: print "%s is not in self.cateData. Will be infered"%index
+                exclData.append(index)
 
         f = open(fpath,"w")
         writer = csv.writer(f, lineterminator='\n')
@@ -438,12 +494,14 @@ class NaiveBayes:
         writer.writerow(line)
 
         cnt = -1
-        for index in self.textData:
+        for index in self.cateData.keys()+exclData:
             cnt += 1
             if cnt%10 == 0: print "%d/%d"%(cnt,len(self.textData))
-            if not index in self.cateData: continue
             
-            truth = self.cateData[index]
+            if index in self.cateData:
+                truth = self.cateData[index]
+            else:
+                truth = ""
 
             res = self.scoreDict(self.textData[index],wordFilter=wordFilter)
             pro = self.convertToProb(res)
@@ -460,7 +518,7 @@ class NaiveBayes:
                 pwCnt+=1
             print
 
-            for w in pw[:min(len(pw),topn)]: line.append(w[0].encode("utf-8"))
+            for w in pw[:min(len(pw),topn)]: line.append(w[0])
             if len(pw)<topn:
                 for i in range(topn-len(pw)): line.append("")
 
@@ -468,15 +526,15 @@ class NaiveBayes:
             if len(pw)<topn:
                 for i in range(topn-len(pw)): line.append("")
 
-            writer.writerow(line)
+            writer.writerow([unicode(x).encode("shift-jis","ignore") for x in self.unicodeCvt(line)])
         f.close()
         return
 
     def dumpWordsByCompany(self,fpath,classList=None,topn=10,wordFilter=None):
         print "TestByCompany()"
-        print "load data.."
-        if not self.textData: self.loadTextFile(self.textFile_fpath,self.textFile_index_column,self.textFile_columns_to_use)
-        print "..done"
+        #print "load data.."
+        #if not self.textData: self.loadTextFile(self.textFile_fpath,self.textFile_index_column,self.textFile_columns_to_use)
+        #print "..done"
 
         f = open(fpath,"w")
         writer = csv.writer(f, lineterminator='\n')
@@ -498,7 +556,8 @@ class NaiveBayes:
             words = self.countWords(index,topn=topn,wordFilter=wordFilter,verbose=False)
             line = [title]
 
-            for w in words: line.append(w[0].encode("utf-8"))
+            #for w in words: line.append(w[0].encode("utf-8"))
+            for w in words: line.append(w[0])
             if len(words)<topn:
                 for i in range(topn-len(words)): line.append("")
 
@@ -506,7 +565,7 @@ class NaiveBayes:
             if len(words)<topn:
                 for i in range(topn-len(words)): line.append(0)
 
-            writer.writerow(line)
+            writer.writerow([unicode(x).encode("shift-jis","neglect") for x in self.unicodeCvt(line)])
         f.close()
         return
 
@@ -537,8 +596,9 @@ class NaiveBayes:
 
 if __name__ == "__main__":
     #nb = NaiveBayes()
-    #nb.loadTextFile    (fpath="data/UFO.csv",index_column=u"code4",columns_to_use=[u'situation', u'issue', u'risk', u'financial'])
-    #nb.loadCategoryFile(fpath="data/category.csv" ,index_column=u"銘柄コード",column_to_use=u"NEEDS業種名-中分類･主業種")
+    #nb.addTextFile    (fpath="data/20170531_bunrui_Kari.csv",index_column="銘柄コード",columns_to_use=['売上モデル', '営業利益モデル'], applyMecab=False, minFreq=None)
+    #nb.addTextFile    (fpath="data/UFO.csv",index_column="code4",columns_to_use=['situation', 'issue', 'risk', 'financial'], minFreq=100)
+    #nb.loadCategoryFile(fpath="data/20170531_bunrui_Kari.csv" ,index_column="銘柄コード",column_to_use="事業構造モデル仮名")
     #nb.train(minFreq=100)
     #print nb
     #nb.save("data/trainedModel.pickle")
@@ -551,4 +611,4 @@ if __name__ == "__main__":
     wd = nb.cleanupWords(wd,exclude_path="data/excludeWords.csv")
     wd = nb.wordInfo(fpath="analysis/words_to_use.csv",maxEntropy=-0.45)
 
-    nb.TestByCompany(fpath="analysis/result.csv",topn=25,wordFilter=wd)
+    nb.TestByCompany(fpath="analysis/result.csv",topn=25,wordFilter=wd,verbose=True)
