@@ -121,7 +121,7 @@ class NaiveBayes:
                 else:
                     words = []
                     for i in idx_to_use:
-                        words.append(row[i])
+                        words.append(unicode(row[i],"utf-8"))
                     myTextData[index] = words
 
         # unicode -> utf-8へ変換
@@ -660,6 +660,6 @@ if __name__ == "__main__":
     wd1 = nb.cleanupWords(wd0,exclude_path="data/excludeWords.csv")
     wd2 = nb.wordInfo(fpath="analysis/words_to_use.csv",wordFilter=wd1,minFreq=100)
 
-    #nb.TestByCompany(fpath="analysis/result_stability.csv",topn=25,wordFilter=wd2,verbose=True)
-    nb.nFoldTest(fpath="analysis/5FoldTest_stability.csv",nFold=5,wordFilter=wd2)
-    nb.nFoldTest(fpath="analysis/5FoldTest_stability_countOne.csv",nFold=5,wordFilter=wd2,countOne=True)
+    nb.TestByCompany(fpath="analysis/result_stability.csv",topn=25,wordFilter=wd2,verbose=True)
+    #nb.nFoldTest(fpath="analysis/5FoldTest_stability.csv",nFold=5,wordFilter=wd2)
+    #nb.nFoldTest(fpath="analysis/5FoldTest_stability_countOne.csv",nFold=5,wordFilter=wd2,countOne=True)

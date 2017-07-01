@@ -490,7 +490,7 @@ class NaiveBayes:
 
         f = open(fpath,"w")
         writer = csv.writer(f, lineterminator='\n')
-        line = ["code"] + ["truth"] + ["infer"] + ["word%d"%i for i in range(topn)] + ["count%d"%i for i in range(topn)]
+        line = ["code"] + ["truth"] + ["infer","inferProb"] + ["word%d"%i for i in range(topn)] + ["count%d"%i for i in range(topn)]
         writer.writerow(line)
 
         cnt = -1
@@ -507,7 +507,7 @@ class NaiveBayes:
             pro = self.convertToProb(res)
             infer  = sorted(pro.items(), key=lambda x:x[1])[::-1]
 
-            line = [index,truth,infer[0][0]]
+            line = [index,truth,infer[0][0],infer[0][1]*100]
 
             print index,"truth=",truth,"infer= %s(%.1f%%)"%(infer[0][0],infer[0][1]*100.),", %s(%.1f%%)"%(infer[1][0],infer[1][1]*100.),"  :  ",
             pw = self.powerWord(self.textData[index],infer[0][0],wordFilter=wordFilter)
